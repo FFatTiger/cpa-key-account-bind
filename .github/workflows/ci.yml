@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -v ./...
+      - name: Build c-shared (smoke)
+        run: |
+          export CGO_ENABLED=1
+          go build -buildmode=c-shared -o /tmp/kab-build-check.so .
+          rm -f /tmp/kab-build-check.so
