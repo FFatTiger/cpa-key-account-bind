@@ -8,7 +8,7 @@ import (
 const pluginName = "key-account-bind"
 
 // pluginVersion is overridden at release time via -ldflags -X main.pluginVersion=...
-var pluginVersion = "0.2.1"
+var pluginVersion = "0.3.0"
 
 // handleConfigure implements plugin.register / plugin.reconfigure.
 func handleConfigure(req []byte) []byte {
@@ -23,13 +23,14 @@ func handleConfigure(req []byte) []byte {
 		return errorEnvelope("invalid_config", err.Error())
 	}
 	state.Store(p)
+	selections.reset()
 	return okEnvelope(registrationResponse{
 		SchemaVersion: 1,
 		Metadata: registrationMetadata{
 			Name:             pluginName,
 			Version:          pluginVersion,
-			Author:           "huu",
-			GitHubRepository: "https://github.com/router-for-me/CLIProxyAPI",
+			Author:           "FFatTiger",
+			GitHubRepository: "https://github.com/FFatTiger/cpa-key-account-bind",
 			Description:      "Bind downstream API keys to specific upstream credentials (auth files) at scheduler.pick time.",
 			ConfigFields: []configField{
 				{
@@ -42,6 +43,12 @@ func handleConfigure(req []byte) []byte {
 					Type:        "enum",
 					EnumValues:  []string{"passthrough", "deny"},
 					Description: "What to do with downstream keys that have no binding: passthrough (host native scheduling) or deny.",
+				},
+				{
+					Name:        "strategy",
+					Type:        "enum",
+					EnumValues:  []string{strategyRoundRobin, strategyWeightedRoundRobin, strategyFillFirst},
+					Description: "Scheduling strategy inside each key's allowed credential set. Mirrors CPA routing.strategy; default is round-robin.",
 				},
 			},
 		},
@@ -60,7 +67,7 @@ func handleConfigure(req []byte) []byte {
 //	                |         | unbound=deny       -> error (key_not_bound)
 //	present         | set     | filter candidates by allow globs;
 //	                        |   empty result -> error (auth_not_bound) = FAIL
-//	                        |   else pick highest Priority, tie -> lowest ID
+//	                        |   else apply strategy inside the allowed set
 //
 // Errors (not Handled=false) make the host fail the request outright; it
 // never reschedules on its own after a scheduler error. That is the isolation
@@ -110,12 +117,10 @@ func handlePick(req []byte) []byte {
 			fmt.Sprintf("key-account-bind: no eligible credential for this key among %d candidate(s)", len(pr.Candidates)))
 	}
 
-	best := allowed[0]
-	for _, cand := range allowed[1:] {
-		if cand.Priority > best.Priority ||
-			(cand.Priority == best.Priority && cand.ID < best.ID) {
-			best = cand
-		}
+	picked, ok := selectAllowed(p.strategy, selectionScope(key, pr), allowed, requestProviders(pr))
+	if !ok {
+		return errorEnvelope("auth_unavailable",
+			fmt.Sprintf("key-account-bind: no eligible credential for strategy %s", p.strategy))
 	}
-	return okEnvelope(schedulerPickResponse{AuthID: best.ID, Handled: true})
+	return okEnvelope(schedulerPickResponse{AuthID: picked.ID, Handled: true})
 }

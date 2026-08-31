@@ -180,6 +180,7 @@ func TestConfigValidation(t *testing.T) {
 		"bindings:\n  - key: k\n    allow: [\"[\"]",                                 // invalid glob
 		"bindings:\n  - key: k\n    allow: [\"x\"]\n  - key: k\n    allow: [\"y\"]", // dup
 		"unbound: sometimes",
+		"strategy: random",
 	}
 	for i, cfg := range bad {
 		out := handleConfigure([]byte(`{"config_yaml": "` + base64.StdEncoding.EncodeToString([]byte(cfg)) + `"}`))
@@ -207,6 +208,163 @@ func TestReconfigureSwapsPolicy(t *testing.T) {
 	})
 	if err != nil || resp.AuthID != "new-1" {
 		t.Fatalf("phase2: %+v err=%+v", resp, err)
+	}
+}
+
+func TestRoundRobinWithinAllowedSet(t *testing.T) {
+	mustConfigure(t, `
+bindings:
+  - "sk-a=auth-*"
+strategy: round-robin
+`)
+	req := schedulerPickRequest{
+		Provider: "codex",
+		Model:    "gpt-test",
+		Options:  schedulerPickOptions{Headers: map[string][]string{"Authorization": {"Bearer sk-a"}}},
+		Candidates: []schedulerAuthCandidate{
+			{ID: "auth-c", Priority: 7},
+			{ID: "auth-a", Priority: 7},
+			{ID: "auth-b", Priority: 7},
+			{ID: "auth-lower", Priority: 1},
+		},
+	}
+	want := []string{"auth-a", "auth-b", "auth-c", "auth-a"}
+	for i, expected := range want {
+		resp, err := pickResult(t, req)
+		if err != nil || resp.AuthID != expected {
+			t.Fatalf("pick %d = %+v err=%+v, want %s", i, resp, err, expected)
+		}
+	}
+}
+
+func TestRoundRobinThinkingSuffixSharesCursor(t *testing.T) {
+	mustConfigure(t, `
+bindings: ["sk-a=auth-*"]
+strategy: round-robin
+`)
+	req := schedulerPickRequest{
+		Provider:   "codex",
+		Model:      "gpt-test(high)",
+		Options:    schedulerPickOptions{Headers: map[string][]string{"Authorization": {"Bearer sk-a"}}},
+		Candidates: []schedulerAuthCandidate{{ID: "auth-a"}, {ID: "auth-b"}},
+	}
+	first, _ := pickResult(t, req)
+	req.Model = "gpt-test(low)"
+	second, _ := pickResult(t, req)
+	if first.AuthID != "auth-a" || second.AuthID != "auth-b" {
+		t.Fatalf("thinking suffix picks = %s,%s; want auth-a,auth-b", first.AuthID, second.AuthID)
+	}
+}
+
+func TestMixedProviderRoundRobinMatchesCPA(t *testing.T) {
+	mustConfigure(t, `
+bindings: ["sk-a=auth-*"]
+strategy: round-robin
+`)
+	req := schedulerPickRequest{
+		Providers: []string{"provider-a", "provider-b"},
+		Model:     "shared-model",
+		Options:   schedulerPickOptions{Headers: map[string][]string{"Authorization": {"Bearer sk-a"}}},
+		Candidates: []schedulerAuthCandidate{
+			{ID: "auth-a1", Provider: "provider-a"},
+			{ID: "auth-a2", Provider: "provider-a"},
+			{ID: "auth-b1", Provider: "provider-b"},
+		},
+	}
+	want := []string{"auth-a1", "auth-a2", "auth-b1", "auth-a1"}
+	for i, expected := range want {
+		resp, err := pickResult(t, req)
+		if err != nil || resp.AuthID != expected {
+			t.Fatalf("mixed pick %d = %+v err=%+v, want %s", i, resp, err, expected)
+		}
+	}
+}
+
+func TestRoundRobinSurvivesCandidateShrink(t *testing.T) {
+	mustConfigure(t, `
+bindings: ["sk-a=auth-*"]
+strategy: round-robin
+`)
+	base := schedulerPickRequest{
+		Provider:   "codex",
+		Model:      "gpt-test",
+		Options:    schedulerPickOptions{Headers: map[string][]string{"Authorization": {"Bearer sk-a"}}},
+		Candidates: []schedulerAuthCandidate{{ID: "auth-a"}, {ID: "auth-b"}, {ID: "auth-c"}},
+	}
+	resp, _ := pickResult(t, base)
+	if resp.AuthID != "auth-a" {
+		t.Fatalf("first = %s, want auth-a", resp.AuthID)
+	}
+	// Simulate a retry/cooldown that temporarily removes auth-b. CPA resumes at
+	// the first auth ID after the last pick, so auth-c is selected.
+	base.Candidates = []schedulerAuthCandidate{{ID: "auth-a"}, {ID: "auth-c"}}
+	resp, _ = pickResult(t, base)
+	if resp.AuthID != "auth-c" {
+		t.Fatalf("after shrink = %s, want auth-c", resp.AuthID)
+	}
+}
+
+func TestFillFirstWithinAllowedSet(t *testing.T) {
+	mustConfigure(t, `
+bindings: ["sk-a=auth-*"]
+strategy: fill-first
+`)
+	req := schedulerPickRequest{
+		Provider:   "codex",
+		Model:      "gpt-test",
+		Options:    schedulerPickOptions{Headers: map[string][]string{"Authorization": {"Bearer sk-a"}}},
+		Candidates: []schedulerAuthCandidate{{ID: "auth-b"}, {ID: "auth-a"}},
+	}
+	for i := 0; i < 3; i++ {
+		resp, err := pickResult(t, req)
+		if err != nil || resp.AuthID != "auth-a" {
+			t.Fatalf("pick %d = %+v err=%+v, want auth-a", i, resp, err)
+		}
+	}
+}
+
+func TestWeightedRoundRobinWithinAllowedSet(t *testing.T) {
+	mustConfigure(t, `
+bindings: ["sk-a=auth-*"]
+strategy: weighted-round-robin
+`)
+	req := schedulerPickRequest{
+		Provider: "codex",
+		Model:    "gpt-test",
+		Options:  schedulerPickOptions{Headers: map[string][]string{"Authorization": {"Bearer sk-a"}}},
+		Candidates: []schedulerAuthCandidate{
+			{ID: "auth-a", Attributes: map[string]string{"weight": "2"}},
+			{ID: "auth-b", Attributes: map[string]string{"weight": "1"}},
+			{ID: "auth-zero", Attributes: map[string]string{"weight": "0"}},
+		},
+	}
+	want := []string{"auth-a", "auth-b", "auth-a", "auth-a", "auth-b", "auth-a"}
+	for i, expected := range want {
+		resp, err := pickResult(t, req)
+		if err != nil || resp.AuthID != expected {
+			t.Fatalf("pick %d = %+v err=%+v, want %s", i, resp, err, expected)
+		}
+	}
+}
+
+func TestReconfigureResetsRotation(t *testing.T) {
+	cfg := "bindings: [\"sk-a=auth-*\"]\nstrategy: round-robin\n"
+	mustConfigure(t, cfg)
+	req := schedulerPickRequest{
+		Provider:   "codex",
+		Model:      "gpt-test",
+		Options:    schedulerPickOptions{Headers: map[string][]string{"Authorization": {"Bearer sk-a"}}},
+		Candidates: []schedulerAuthCandidate{{ID: "auth-a"}, {ID: "auth-b"}},
+	}
+	first, _ := pickResult(t, req)
+	second, _ := pickResult(t, req)
+	if first.AuthID != "auth-a" || second.AuthID != "auth-b" {
+		t.Fatalf("before reconfigure = %s,%s", first.AuthID, second.AuthID)
+	}
+	mustConfigure(t, cfg)
+	after, _ := pickResult(t, req)
+	if after.AuthID != "auth-a" {
+		t.Fatalf("after reconfigure = %s, want auth-a", after.AuthID)
 	}
 }
 

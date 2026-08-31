@@ -28,6 +28,7 @@ CLIProxyAPI 原生插件：把下游 API key 绑定到指定上游凭证（auth 
 - 绑定的 key：只落在 allow 列表匹配的 auth ID 上；没有可用候选时请求**硬失败**（`auth_not_bound`），不降级、不回退。
 - 未绑定的 key（含管理员自己的）：按 `unbound` 策略，`passthrough` 交给宿主原生调度（默认），或 `deny` 一律拒绝。
 - 失败重试、冷却、多 provider 混合路由均兼容：每次重选都会再次过插件过滤。
+- 允许集内支持 CPA 同名策略：`round-robin`（默认）、`weighted-round-robin`、`fill-first`；优先级、ID 排序、平滑加权和候选缩小时的游标恢复按 CPA 原生算法实现。
 
 ## 配置（plugins.configs.key-account-bind）
 
@@ -42,6 +43,7 @@ plugins:
         - "sk-tenant-a=openai-compatible:chan-a:*"   # key=允许的authID glob，逗号分隔
         - "sk-tenant-b=codex-bob*.json,claude-main*.json"
       unbound: passthrough            # passthrough | deny
+      strategy: round-robin           # round-robin | weighted-round-robin | fill-first
 ```
 
 也支持完整对象格式（两种可混用，效果相同）：
@@ -59,14 +61,15 @@ plugins:
 
 ## 在管理面板里改配置
 
-插件在 CPAMC「插件启停与配置」页声明了可视化字段（v0.2.0+）：`bindings` 数组（紧凑字符串格式，面板里直接增删行）和 `unbound` 下拉框。保存即写回 config.yaml 并热生效。旧版本（v0.1.0）未声明字段，面板显示为空，需手工编辑 yaml。
+插件在 CPAMC「插件启停与配置」页声明了可视化字段：`bindings` 数组（紧凑字符串格式，面板里直接增删行）、`unbound` 下拉框，以及 v0.3.0+ 的 `strategy` 下拉框。保存即写回 config.yaml 并热生效。
 
 ## 注意事项
 
 1. **绑定 key 不得依赖 query 传参认证**（见上）。
 2. **与其他 scheduler 类插件互斥**：宿主只把第一个注册的 scheduler 插件接入调度链。先卸载 cpa-key-policy 之类再启用本插件。
 3. 绑定 key 仍必须存在于原生 `api-keys`——本插件不负责认证，只负责调度隔离。两层正交，原生认证失败照样 401。
-4. 兼容 CLIProxyAPI v7.2.x（在 v7.2.146 实测）。
+4. 当前 CPA 插件 ABI 不能把“过滤后的候选集”交回原生调度器，因此 `strategy` 由插件独立配置；请与全局 `routing.strategy` 保持一致。省略时默认 `round-robin`。
+5. 兼容 CLIProxyAPI v7.2.x（在 v7.2.146 实测）。
 
 ## 安装
 

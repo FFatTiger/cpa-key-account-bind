@@ -20,6 +20,7 @@ import (
 type pluginConfig struct {
 	Bindings bindingList `yaml:"bindings"`
 	Unbound  string      `yaml:"unbound"`
+	Strategy string      `yaml:"strategy"`
 }
 
 // bindingList accepts either compact string entries or full object entries:
@@ -73,6 +74,10 @@ type policy struct {
 	// unboundPassthrough: keys not present in byKey fall back to the host
 	// scheduler. When false, unknown-but-natively-valid keys are denied.
 	unboundPassthrough bool
+	// strategy is applied inside the filtered/allowed candidate set. The current
+	// CPA plugin ABI cannot pass a filtered set back to the native selector, so
+	// the plugin mirrors the built-in strategy locally.
+	strategy string
 }
 
 type binding struct {
@@ -94,7 +99,7 @@ func (b *binding) matches(id string) bool {
 }
 
 func defaultPolicy() *policy {
-	return &policy{byKey: map[string]*binding{}, unboundPassthrough: true}
+	return &policy{byKey: map[string]*binding{}, unboundPassthrough: true, strategy: strategyRoundRobin}
 }
 
 func parsePolicy(raw []byte) (*policy, error) {
@@ -113,6 +118,11 @@ func parsePolicy(raw []byte) (*policy, error) {
 	default:
 		return nil, fmt.Errorf("invalid unbound policy %q (want passthrough or deny)", cfg.Unbound)
 	}
+	strategy, errStrategy := normalizeStrategy(cfg.Strategy)
+	if errStrategy != nil {
+		return nil, errStrategy
+	}
+	p.strategy = strategy
 	for i, rule := range cfg.Bindings {
 		key := strings.TrimSpace(rule.Key)
 		if key == "" {
@@ -153,6 +163,19 @@ func (p *policy) bindingFor(key string) *binding {
 func validateConfig(raw []byte) error {
 	_, err := parsePolicy(raw)
 	return err
+}
+
+func normalizeStrategy(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "round-robin", "roundrobin", "rr":
+		return strategyRoundRobin, nil
+	case "weighted-round-robin", "weightedroundrobin", "wrr":
+		return strategyWeightedRoundRobin, nil
+	case "fill-first", "fillfirst", "ff":
+		return strategyFillFirst, nil
+	default:
+		return "", fmt.Errorf("invalid strategy %q (want round-robin, weighted-round-robin, or fill-first)", raw)
+	}
 }
 
 // sortedKeys is a test/diagnostic helper.
