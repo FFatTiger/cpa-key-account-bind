@@ -5,10 +5,10 @@ import (
 	"fmt"
 )
 
-const (
-	pluginName    = "key-account-bind"
-	pluginVersion = "0.2.0"
-)
+const pluginName = "key-account-bind"
+
+// pluginVersion is overridden at release time via -ldflags -X main.pluginVersion=...
+var pluginVersion = "0.2.1"
 
 // handleConfigure implements plugin.register / plugin.reconfigure.
 func handleConfigure(req []byte) []byte {

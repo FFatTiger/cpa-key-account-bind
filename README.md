@@ -68,11 +68,18 @@ plugins:
 3. 绑定 key 仍必须存在于原生 `api-keys`——本插件不负责认证，只负责调度隔离。两层正交，原生认证失败照样 401。
 4. 兼容 CLIProxyAPI v7.2.x（在 v7.2.146 实测）。
 
-## 构建
+## 安装
+
+GitHub Releases 按官方商店规范发布 zip：`key-account-bind_<version>_<goos>_<goarch>.zip`，解压后把动态库放进 CPA 的 `plugins/` 目录：
+
+- Linux: `key-account-bind.so`
+- macOS: `key-account-bind.dylib`
+- Windows: `key-account-bind.dll`
+
+从源码构建：
 
 ```sh
 CGO_ENABLED=1 go build -buildmode=c-shared -o key-account-bind.so .
-# 产物放入 CPA 的 plugins 目录（linux/amd64）
 ```
 
 ## 验收记录（2026-08-31，v7.2.146 实测）
