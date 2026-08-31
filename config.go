@@ -18,8 +18,47 @@ import (
 //	    allow: ["codex-b*"]
 //	unbound: passthrough   # passthrough | deny  (default passthrough)
 type pluginConfig struct {
-	Bindings []bindingRule `yaml:"bindings"`
-	Unbound  string        `yaml:"unbound"`
+	Bindings bindingList `yaml:"bindings"`
+	Unbound  string      `yaml:"unbound"`
+}
+
+// bindingList accepts either compact string entries or full object entries:
+//
+//	bindings:
+//	  - "sk-tenant-a=team-*.json,vip-*"          # compact: key=glob1,glob2
+//	  - key: "sk-tenant-b"                        # verbose object form
+//	    allow: ["codex-b*"]
+//
+// The compact form keeps the whole config editable from the CPAMC plugin
+// panel, which only supports string arrays natively.
+type bindingList []bindingRule
+
+func (l *bindingList) UnmarshalYAML(node *yaml.Node) error {
+	*l = nil
+	for i, item := range node.Content {
+		var rule bindingRule
+		switch item.Tag {
+		case "!!str":
+			parts := strings.SplitN(item.Value, "=", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("bindings[%d]: compact entry must be \"key=glob1,glob2\"", i)
+			}
+			rule.Key = strings.TrimSpace(parts[0])
+			for _, a := range strings.Split(parts[1], ",") {
+				if a = strings.TrimSpace(a); a != "" {
+					rule.Allow = append(rule.Allow, a)
+				}
+			}
+		case "!!map":
+			if err := item.Decode(&rule); err != nil {
+				return fmt.Errorf("bindings[%d]: %w", i, err)
+			}
+		default:
+			return fmt.Errorf("bindings[%d]: must be a string or a mapping", i)
+		}
+		*l = append(*l, rule)
+	}
+	return nil
 }
 
 type bindingRule struct {

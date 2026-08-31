@@ -23,11 +23,20 @@ type registrationResponse struct {
 }
 
 type registrationMetadata struct {
-	Name             string `json:"Name"`
-	Version          string `json:"Version"`
-	Author           string `json:"Author"`
-	GitHubRepository string `json:"GitHubRepository"`
-	Description      string `json:"Description,omitempty"`
+	Name             string        `json:"Name"`
+	Version          string        `json:"Version"`
+	Author           string        `json:"Author"`
+	GitHubRepository string        `json:"GitHubRepository"`
+	Description      string        `json:"Description,omitempty"`
+	ConfigFields     []configField `json:"ConfigFields"`
+}
+
+// configField mirrors pluginapi.ConfigField (PascalCase JSON like the host).
+type configField struct {
+	Name        string   `json:"Name"`
+	Type        string   `json:"Type"`
+	EnumValues  []string `json:"EnumValues,omitempty"`
+	Description string   `json:"Description,omitempty"`
 }
 
 type registrationCapability struct {

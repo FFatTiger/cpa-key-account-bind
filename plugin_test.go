@@ -225,6 +225,47 @@ func TestPanicRecovery(t *testing.T) {
 	}
 }
 
+func TestCompactStringBindings(t *testing.T) {
+	mustConfigure(t, `
+bindings:
+  - "sk-a=team-*.json,vip-*"
+  - key: "sk-b"
+    allow: ["codex-b*"]
+unbound: passthrough
+`)
+	hdrs := func(k string) map[string][]string { return map[string][]string{"Authorization": {"Bearer " + k}} }
+	cands := []schedulerAuthCandidate{
+		{ID: "team-1.json"}, {ID: "vip-2"}, {ID: "codex-b-3"}, {ID: "other-4"},
+	}
+	resp, err := pickResult(t, schedulerPickRequest{Options: schedulerPickOptions{Headers: hdrs("sk-a")}, Candidates: cands})
+	if err != nil || !resp.Handled || resp.AuthID != "team-1.json" {
+		t.Fatalf("compact binding a: %+v err=%+v", resp, err)
+	}
+	resp, err = pickResult(t, schedulerPickRequest{Options: schedulerPickOptions{Headers: hdrs("sk-b")}, Candidates: cands})
+	if err != nil || !resp.Handled || resp.AuthID != "codex-b-3" {
+		t.Fatalf("object binding b: %+v err=%+v", resp, err)
+	}
+	_, err = pickResult(t, schedulerPickRequest{Options: schedulerPickOptions{Headers: hdrs("sk-a")}, Candidates: []schedulerAuthCandidate{{ID: "codex-b-3"}}})
+	if err == nil || err.Code != "auth_not_bound" {
+		t.Fatalf("want auth_not_bound for bound key with no matching candidate, got %+v", err)
+	}
+}
+
+func TestCompactBindingValidation(t *testing.T) {
+	for _, bad := range []string{
+		"bindings:\n  - \"no-equals-sign\"",
+		"bindings:\n  - \"=onlyglobs\"",
+		"bindings:\n  - 42",
+	} {
+		out := handleConfigure([]byte(`{"config_yaml": "` + base64.StdEncoding.EncodeToString([]byte(bad)) + `"}`))
+		var env envelope
+		_ = json.Unmarshal(out, &env)
+		if env.OK || env.Error == nil {
+			t.Fatalf("want error for %q, got %s", bad, out)
+		}
+	}
+}
+
 func TestUnknownMethod(t *testing.T) {
 	out := dispatch("bogus.method", nil)
 	var env envelope

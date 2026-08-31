@@ -7,7 +7,7 @@ import (
 
 const (
 	pluginName    = "key-account-bind"
-	pluginVersion = "0.1.0"
+	pluginVersion = "0.2.0"
 )
 
 // handleConfigure implements plugin.register / plugin.reconfigure.
@@ -28,9 +28,22 @@ func handleConfigure(req []byte) []byte {
 		Metadata: registrationMetadata{
 			Name:             pluginName,
 			Version:          pluginVersion,
-			Author:           "FFatTiger",
+			Author:           "huu",
 			GitHubRepository: "https://github.com/router-for-me/CLIProxyAPI",
 			Description:      "Bind downstream API keys to specific upstream credentials (auth files) at scheduler.pick time.",
+			ConfigFields: []configField{
+				{
+					Name:        "bindings",
+					Type:        "array",
+					Description: "Per-key bindings, one entry per line: key=allowGlob1,allowGlob2 (globs match auth file names, case-insensitive). Compact form: \"sk-a=team-*.json,vip-*\"",
+				},
+				{
+					Name:        "unbound",
+					Type:        "enum",
+					EnumValues:  []string{"passthrough", "deny"},
+					Description: "What to do with downstream keys that have no binding: passthrough (host native scheduling) or deny.",
+				},
+			},
 		},
 		Capabilities: registrationCapability{Scheduler: true},
 	})

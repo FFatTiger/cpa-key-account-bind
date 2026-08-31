@@ -38,20 +38,28 @@ plugins:
   configs:
     key-account-bind:
       enabled: true
+      bindings:                       # 紧凑格式（CPAMC 面板可直接编辑）
+        - "sk-tenant-a=openai-compatible:chan-a:*"   # key=允许的authID glob，逗号分隔
+        - "sk-tenant-b=codex-bob*.json,claude-main*.json"
+      unbound: passthrough            # passthrough | deny
+```
+
+也支持完整对象格式（两种可混用，效果相同）：
+
+```yaml
       bindings:
         - key: sk-tenant-a            # 必须同时存在于原生 api-keys
-          allow:                      # glob，匹配 auth ID（大小写不敏感）
-            - "openai-compatibility:chan-a:*"
-        - key: sk-tenant-b
           allow:
-            - "codex-bob*.json"       # OAuth 账号文件名
-            - "claude-main*.json"
-      unbound: passthrough            # passthrough | deny
+            - "openai-compatible:chan-a:*"
 ```
 
 - `allow` 用 `path.Match` glob 匹配候选的 auth ID：OAuth 账号 = auth 文件名；openai-compatibility = `openai-compatibility:<channel>:<hash>`（channel 名可通配）。
 - 绑定的 key 认证走 header（`Authorization: Bearer` / `X-Api-Key` / `x-goog-api-key` 等）。**query 参数传 key 的客户端（`?key=`）调度器看不到**，会按未绑定处理——这类客户端请用 `passthrough` 或改用 header。
 - 修改配置即热生效（宿主 config watcher 触发 plugin.reconfigure）。
+
+## 在管理面板里改配置
+
+插件在 CPAMC「插件启停与配置」页声明了可视化字段（v0.2.0+）：`bindings` 数组（紧凑字符串格式，面板里直接增删行）和 `unbound` 下拉框。保存即写回 config.yaml 并热生效。旧版本（v0.1.0）未声明字段，面板显示为空，需手工编辑 yaml。
 
 ## 注意事项
 
