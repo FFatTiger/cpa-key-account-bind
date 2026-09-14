@@ -18,9 +18,10 @@ import (
 //	    allow: ["codex-b*"]
 //	unbound: passthrough   # passthrough | deny  (default passthrough)
 type pluginConfig struct {
-	Bindings bindingList `yaml:"bindings"`
-	Unbound  string      `yaml:"unbound"`
-	Strategy string      `yaml:"strategy"`
+	Isolation isolationConfig `yaml:"account-isolation"`
+	Bindings  bindingList     `yaml:"bindings"`
+	Unbound   string          `yaml:"unbound"`
+	Strategy  string          `yaml:"strategy"`
 }
 
 // bindingList accepts either compact string entries or full object entries:
@@ -69,6 +70,7 @@ type bindingRule struct {
 
 // policy is the immutable, compiled form of pluginConfig.
 type policy struct {
+	isolation *isolationPolicy
 	// byKey maps lowercase downstream key -> allowed-ID matcher set.
 	byKey map[string]*binding
 	// unboundPassthrough: keys not present in byKey fall back to the host
@@ -123,6 +125,11 @@ func parsePolicy(raw []byte) (*policy, error) {
 		return nil, errStrategy
 	}
 	p.strategy = strategy
+	var isolationErr error
+	p.isolation, isolationErr = compileIsolation(cfg.Isolation)
+	if isolationErr != nil {
+		return nil, isolationErr
+	}
 	for i, rule := range cfg.Bindings {
 		key := strings.TrimSpace(rule.Key)
 		if key == "" {

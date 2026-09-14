@@ -59,13 +59,15 @@ func bearerToken(value string) string {
 	return ""
 }
 
-// candidateUsable mirrors the host's usable-status filter. Unknown status
-// strings are treated as usable — the host already excluded hard-failed auths
-// from the candidate list before calling us; this is defense in depth.
+// The host checks model-specific cooldowns and hard authentication failures
+// before supplying candidates. Its aggregate "error" status can outlive a
+// temporary failure or belong to another model, so it must not prevent an
+// otherwise eligible retry here. Explicit terminal statuses remain excluded
+// as defense in depth; unknown statuses are left to the host's availability check.
 func candidateUsable(status string) bool {
 	s := normalizeStatus(status)
 	switch s {
-	case "disabled", "error", "expired", "revoked", "invalid", "unavailable",
+	case "disabled", "expired", "revoked", "invalid", "unavailable",
 		"cooldown", "cooling_down", "quota_exhausted", "exhausted", "blocked":
 		return false
 	default:

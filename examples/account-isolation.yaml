@@ -1,0 +1,43 @@
+# Sanitized fragment. Merge into the existing CPA config; never use as a full config.
+force-model-prefix: true
+plugins:
+  enabled: true
+  dir: /absolute/path/to/plugins
+  configs:
+    key-account-bind:
+      enabled: true
+      strategy: round-robin
+      unbound: deny # unclassified downstream keys cannot schedule
+      bindings:
+        - key: REPLACE_WITH_A_NATIVE_DOWNSTREAM_KEY
+          allow: ["codex-personal.json"]
+        - key: REPLACE_WITH_A_WORK_DOWNSTREAM_KEY
+          allow: ["claude-work.json", "codex:apikey:REPLACE_WITH_ACTUAL_ID"]
+      account-isolation:
+        enabled: true
+        require-scope-bound-key: true
+        state-file: /absolute/path/to/account-scope-state.json
+        max-sessions: 100000
+        credentials:
+          - id: codex-personal.json
+            provider: codex
+            scope: personal
+            source: codex-oauth
+          - id: claude-work.json
+            provider: claude
+            scope: work
+            source: claude-oauth
+          # Use the actual synthesized scheduler ID, not a key or config index.
+          # Its hash can change after changing prefix, endpoint, or API key.
+          - id: codex:apikey:REPLACE_WITH_ACTUAL_ID
+            provider: codex
+            scope: work
+            source: litellm
+# Set OAuth auth JSON prefix to "personal" / "work", and model_aliases entries:
+# {"name":"gpt-6-astra","alias":"codex-oauth/gpt-6-astra",
+#  "display-name":"[P · Codex] GPT-6 Astra"}
+# For a gateway, set prefix: work and use native model mappings, for example:
+# models:
+#   - name: upstream-glm-name
+#     alias: litellm/glm-5.3-flash
+#     display-name: "[W · LiteLLM] GLM 5.3 Flash"

@@ -31,7 +31,7 @@ func handleConfigure(req []byte) []byte {
 			Version:          pluginVersion,
 			Author:           "FFatTiger",
 			GitHubRepository: "https://github.com/FFatTiger/cpa-key-account-bind",
-			Description:      "Bind downstream API keys to specific upstream credentials (auth files) at scheduler.pick time.",
+			Description:      "Bind API keys and account-scoped agent trees to upstream credentials using the standard CPA scheduler plugin API.",
 			ConfigFields: []configField{
 				{
 					Name:        "bindings",
@@ -85,6 +85,25 @@ func handlePick(req []byte) []byte {
 	}
 
 	key := extractDownstreamKey(pr.Options.Headers)
+	if p.isolation != nil {
+		if key == "" {
+			return errorEnvelope("scope_denied", "downstream key identity unavailable")
+		}
+		b := p.bindingFor(key)
+		if b == nil && !p.unboundPassthrough {
+			return errorEnvelope("key_not_bound", "downstream key is not bound")
+		}
+		allowed, err := p.isolation.filter(pr, b)
+		if err != nil {
+			return errorEnvelope("scope_denied", err.Error())
+		}
+		picked, ok := selectAllowed(p.strategy, selectionScope(key, pr), allowed, requestProviders(pr))
+		if !ok {
+			return errorEnvelope("scope_denied", "no authorized credential available")
+		}
+		return okEnvelope(schedulerPickResponse{AuthID: picked.ID, Handled: true})
+	}
+
 	if key == "" {
 		// Caller identity not visible from headers (e.g. query-param key or
 		// internal calls). We cannot enforce a binding, so defer to host.

@@ -93,3 +93,94 @@ CGO_ENABLED=1 go build -buildmode=c-shared -o key-account-bind.so .
 - `X-Api-Key`、小写 `bearer`、大写 key 值等 header 形态均正确识别
 - 未绑定 key passthrough 正常走原生调度
 - 配置热重载（改 yaml 免重启生效）
+
+## Account-tree isolation
+
+This is a **standalone native CPA plugin**. It runs on the standard core; no core
+patch, custom core build, or replacement update channel is required. Normal
+EasyCLIProxy core updates can keep the plugin library, configuration and state.
+As with other plugins, future CPA versions must retain a compatible plugin API.
+
+Isolation is optional and disabled by default. When enabled, it composes existing
+API-key bindings, exact credential classification, the selected provenance route,
+and persistent tree scope. See [the example](examples/account-isolation.yaml) and
+[deployment guidance](docs/DEPLOYMENT.md).
+
+### Routing and identity
+
+Classify each scheduler candidate by exact `id`, `provider`, `scope` and `source`.
+Scope names use lowercase ASCII letters, digits and hyphens, start with a letter
+or digit, and contain at most 64 bytes.
+OAuth files, API-key credentials and OpenAI-compatible channels use the same
+mechanism. Unknown credentials are excluded. Update the classification if CPA
+changes a synthesized credential ID after a key, prefix or endpoint change.
+
+Use CPA's native prefix plus model aliases to expose
+`<scope>/<source>/<canonical-model>`, with `force-model-prefix: true`. For example,
+set prefix `work` and alias `litellm/glm-5.3-flash`. Native `display-name` fields
+provide configurable friendly labels; full route IDs also distinguish duplicate
+models. The plugin verifies the candidate's configured classification against
+the route, rather than trusting the route text alone.
+
+The plugin reads CPA's existing `canonical_session_id` and `parent_session_id`
+scheduler metadata, including identities extracted by CPA from Claude request
+bodies. For Codex, explicit thread/parent headers take precedence over a name-based
+agent identity, so nested children use stable thread IDs. UUID normalization is
+stable across protocol prefixes and plugin restarts. No private host
+metadata or additional request hooks are needed.
+
+A root establishes its scope through a classified route. Children inherit the
+persisted parent's scope. Changing models or sources within that scope is allowed;
+changing the tree's scope or parent is rejected. Retry selections repeat the
+candidate filtering. Original key-binding behavior is unchanged when isolation
+is disabled.
+
+`require-scope-bound-key` optionally requires a downstream binding whose classified
+allow-list belongs to a single scope; it defaults to true. Set it to false to let otherwise permitted unbound keys
+establish scope through a provenance route. These client identities are protocol
+metadata, not cryptographic proof of ancestry.
+
+### State
+
+State stores hashed session IDs, scope, parent linkage and a checksum, with no
+credentials or prompts. Private atomic writes and a lock serialize concurrent
+updates. The configured capacity defaults to 100,000 sessions, without automatic
+eviction. Missing/corrupt state or a stale crash lock requires recovery from a
+verified backup. Do not reset an existing store to fix a resumed session.
+
+Initialize a **new** store only with:
+
+```sh
+python3 scripts/init-scope-state.py /absolute/path/to/account-scope-state.json
+```
+
+### Operation and updates
+
+Build on the runtime platform:
+
+```sh
+go test -race ./...
+go vet ./...
+CGO_ENABLED=1 go build -buildmode=c-shared -o key-account-bind.dylib .
+```
+
+Use the platform's library extension, and install into the existing CPA plugin
+directory. Keep this plugin enabled as the active scheduler. Standard CPA may
+use its builtin scheduler if a plugin is disabled, unavailable or fails to load;
+this version intentionally does not patch the host to prevent that behavior.
+Home dispatch and special execution paths outside the standard scheduler are not
+covered. The discovered Codex/Claude/LiteLLM routes use the standard scheduler.
+
+After a core update, verify that the plugin is registered and active, and test both
+an allowed and a denied scoped request before resuming work. Back up configuration,
+the library and persistent state together. Scheduler rejection currently surfaces
+as an HTTP 500 in CPA; this plugin does not control that HTTP mapping.
+
+The optional launcher requires an explicit model and key directory:
+
+```sh
+python3 scripts/codex-scope.py --model personal/source/model --key-dir /private/keys personal -- exec "task"
+```
+
+The key is inherited through the environment rather than passed in process arguments.
+The launcher does not change the Codex configuration file.

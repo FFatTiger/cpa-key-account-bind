@@ -2,3 +2,11 @@
 *.dylib
 *.dll
 .DS_Store
+*.key
+*.pyc
+__pycache__/
+key-account-bind*.h
+account-scope-state.json
+account-scope-state.json.lock
+.scope-state-*
+/config.local.yaml
