@@ -114,6 +114,14 @@ unbound: passthrough
 			t.Fatalf("want auth_not_bound, got %+v", err)
 		}
 	})
+
+	t.Run("sticky host error status stays usable", func(t *testing.T) {
+		recovering := []schedulerAuthCandidate{{ID: "codex-b1.json", Status: "error"}, {ID: "team-1.json"}}
+		resp, err := pickResult(t, schedulerPickRequest{Options: schedulerPickOptions{Headers: hdrs("sk-b")}, Candidates: recovering})
+		if err != nil || !resp.Handled || resp.AuthID != "codex-b1.json" {
+			t.Fatalf("want codex-b1.json, got %+v err=%+v", resp, err)
+		}
+	})
 }
 
 func TestUnboundDeny(t *testing.T) {

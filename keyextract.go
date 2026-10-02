@@ -62,10 +62,15 @@ func bearerToken(value string) string {
 // candidateUsable mirrors the host's usable-status filter. Unknown status
 // strings are treated as usable — the host already excluded hard-failed auths
 // from the candidate list before calling us; this is defense in depth.
+//
+// "error" is deliberately usable: the host sets it on any upstream failure and
+// clears it only after a later success, while real unavailability is tracked
+// separately and already filtered out by the host. Rejecting it would leave a
+// sole bound credential failing closed forever, as no request could succeed.
 func candidateUsable(status string) bool {
 	s := normalizeStatus(status)
 	switch s {
-	case "disabled", "error", "expired", "revoked", "invalid", "unavailable",
+	case "disabled", "expired", "revoked", "invalid", "unavailable",
 		"cooldown", "cooling_down", "quota_exhausted", "exhausted", "blocked":
 		return false
 	default:
